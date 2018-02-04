@@ -17,15 +17,24 @@ import com.google.api.services.calendar.model.Events;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
 import javafx.scene.Scene;
+import javafx.scene.control.Label;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.VBox;
+import javafx.scene.text.Font;
 import javafx.stage.Stage;
 import org.json.JSONObject;
 
 import java.io.*;
 import java.net.URL;
 import java.net.URLConnection;
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
-
+import java.util.Timer;
 
 
 public class GUI extends Application{
@@ -37,45 +46,85 @@ public class GUI extends Application{
 
         FensterController fensterfenstercontroller = loader.getController();
         fensterfenstercontroller.initializefenster();
+        VBox NewsBox = fensterfenstercontroller.getNewsBox();
+        ImageView wetterIcon = fensterfenstercontroller.getWetterIcon();
+        Label temperatur = fensterfenstercontroller.getTemperatur();
+        setNews(NewsBox);
+        setWetterData(wetterIcon, temperatur);
+
 
         primaryStage.setTitle("GUI");
         primaryStage.setScene(newScene);
+        primaryStage.setFullScreen(true);
         primaryStage.show();
-
     }
 
     public static void main(String[] args){
         launch();
     }
 
-    public static void getWetterData() throws Exception{
+    public static void setWetterData(ImageView wetterIcon, Label temperatur) throws Exception{
         String inputLine;
-        URL openweather = new URL("http://api.openweathermap.org/data/2.5/forecast?id=2820621&APPID=72e171e11967724100a2bc62b8156741");
+        URL openweather = new URL("http://api.openweathermap.org/data/2.5/weather?id=2820621&APPID=72e171e11967724100a2bc62b8156741");
         URLConnection yc = openweather.openConnection();
         BufferedReader in = new BufferedReader(new InputStreamReader(yc.getInputStream()));
         inputLine = in.readLine();
         in.close();
 
+        // WetterIcon setzen
         JSONObject jo;
         jo = new JSONObject(inputLine);
-        System.out.println(jo.toString());
-        JSONObject aktweather = jo.getJSONArray("list").getJSONObject(0);
-        System.out.println("weather: "+aktweather.getJSONArray("weather").getJSONObject(0).getString("main"));
+        JSONObject aktweather = jo.getJSONArray("weather").getJSONObject(0);
+        int sunset = jo.getJSONObject("sys").getInt("sunset");
+        System.out.println(sunset);
+        Date sunsetTime = new Date((long)sunset*1000);
+        System.out.println(sunsetTime.getHours()+":"+sunsetTime.getMinutes());
+        switch(aktweather.getString("main")){
+            case "Rain": wetterIcon.setImage(new Image("/res/regen.png"));
+                break;
+            case "Clouds": wetterIcon.setImage(new Image("/res/wolken.png"));
+                break;
+            case "Clear":
+                if(sunsetTime.getHours() >= LocalTime.now().getHour() && sunsetTime.getMinutes() >= LocalTime.now().getMinute()) {
+                    wetterIcon.setImage(new Image("/res/mond.png"));
+                }else{
+                    wetterIcon.setImage(new Image("/res/sonne.png"));
+                }
+                break;
+
+            default:
+                System.out.println(aktweather.getString("main"));
+
+        }
+
+        //Temperatur setzen
+        double temp = ((int)((jo.getJSONObject("main").getInt("temp")-273.15)*10))/10.0;
+        temperatur.setText(String.valueOf(temp)+"°C");
+        temperatur.setFont(new Font("Arial", 90));
+
+
     }
 
-    public static void getNews() throws Exception{
-        StringBuffer inputjson = new StringBuffer();
+    public static void setNews(VBox newsBox) throws Exception{
+        //HeadLine News
         String inputLine;
-        URL openweather = new URL("https://newsapi.org/v2/top-headlines?sources=die-zeit&apiKey=e6f838bd92694c3cbe8aa71e6cb4e6a9");
-        URLConnection yc = openweather.openConnection();
+        URL headlines = new URL("https://newsapi.org/v2/top-headlines?country=de&apiKey=e6f838bd92694c3cbe8aa71e6cb4e6a9");
+        URLConnection yc = headlines.openConnection();
         BufferedReader in = new BufferedReader(new InputStreamReader(yc.getInputStream()));
         inputLine = in.readLine();
         in.close();
 
         JSONObject alleArtikel = new JSONObject(inputLine);
-        JSONObject ersterArtikel = alleArtikel.getJSONArray("articles").getJSONObject(0);
-        System.out.println(ersterArtikel);
-        System.out.println("Erster Titel= "+ersterArtikel.getString("title"));
+        int totalResults = alleArtikel.getInt("totalResults");
+        if(totalResults > 6){
+            totalResults = 6;
+        }
+        Label tmpLabel;
+        for(int i = 0; i<totalResults; i++){
+            JSONObject aktuellerArtikel = alleArtikel.getJSONArray("articles").getJSONObject(i);
+            tmpLabel = new Label(aktuellerArtikel.getString("title")+"  -  "+aktuellerArtikel.getJSONObject("source").getString("name"));
+            newsBox.getChildren().add(tmpLabel);
+        }
     }
 
 
