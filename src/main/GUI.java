@@ -32,26 +32,23 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.Collections;
-import java.util.Date;
 import java.util.List;
-import java.util.Timer;
 
 
-public class GUI extends Application{
+public class GUI extends Application {
 
     @Override
     public void start(Stage primaryStage) throws Exception {
-        FXMLLoader loader = new FXMLLoader(getClass().getResource("gui.fxml"));
-        Scene newScene = new Scene(loader.load());
+        var loader = new FXMLLoader(getClass().getResource("gui.fxml"));
+        var newScene = new Scene(loader.load());
 
-        FensterController fensterfenstercontroller = loader.getController();
-        fensterfenstercontroller.initializefenster();
-        VBox NewsBox = fensterfenstercontroller.getNewsBox();
-        ImageView wetterIcon = fensterfenstercontroller.getWetterIcon();
-        Label temperatur = fensterfenstercontroller.getTemperatur();
-        setNews(NewsBox);
+        FensterController controller = loader.getController();
+        controller.initializefenster();
+        VBox newsBox = controller.getNewsBox();
+        ImageView wetterIcon = controller.getWetterIcon();
+        Label temperatur = controller.getTemperatur();
+        setNews(newsBox);
         setWetterData(wetterIcon, temperatur);
-
 
         primaryStage.setTitle("GUI");
         primaryStage.setScene(newScene);
@@ -59,82 +56,55 @@ public class GUI extends Application{
         primaryStage.show();
     }
 
-    public static void main(String[] args){
+    public static void main(String[] args) {
         launch();
     }
 
-    public static void setWetterData(ImageView wetterIcon, Label temperatur) throws Exception{
+    public static void setWetterData(ImageView wetterIcon, Label temperatur) throws Exception {
+        var openweather = new URL("http://api.openweathermap.org/data/2.5/weather?id=2820621&APPID=72e171e11967724100a2bc62b8156741");
+        var yc = openweather.openConnection();
         String inputLine;
-        URL openweather = new URL("http://api.openweathermap.org/data/2.5/weather?id=2820621&APPID=72e171e11967724100a2bc62b8156741");
-        URLConnection yc = openweather.openConnection();
-        BufferedReader in = new BufferedReader(new InputStreamReader(yc.getInputStream()));
-        inputLine = in.readLine();
-        in.close();
-
-        // WetterIcon setzen
-        JSONObject jo;
-        jo = new JSONObject(inputLine);
-        JSONObject aktweather = jo.getJSONArray("weather").getJSONObject(0);
-        int sunset = jo.getJSONObject("sys").getInt("sunset");
-        System.out.println(sunset);
-        Date sunsetTime = new Date((long)sunset*1000);
-        System.out.println(sunsetTime.getHours()+":"+sunsetTime.getMinutes());
-        switch(aktweather.getString("main")){
-            case "Rain": wetterIcon.setImage(new Image("/res/regen.png"));
-                break;
-            case "Clouds": wetterIcon.setImage(new Image("/res/wolken.png"));
-                break;
-            case "Clear":
-                if(sunsetTime.getHours() >= LocalTime.now().getHour() && sunsetTime.getMinutes() >= LocalTime.now().getMinute()) {
-                    wetterIcon.setImage(new Image("/res/mond.png"));
-                }else{
-                    wetterIcon.setImage(new Image("/res/sonne.png"));
-                }
-                break;
-
-            default:
-                System.out.println(aktweather.getString("main"));
-
+        try (var in = new BufferedReader(new InputStreamReader(yc.getInputStream()))) {
+            inputLine = in.readLine();
         }
 
-        //Temperatur setzen
-        double temp = ((int)((jo.getJSONObject("main").getInt("temp")-273.15)*10))/10.0;
-        temperatur.setText(String.valueOf(temp)+"°C");
+        var jo = new JSONObject(inputLine);
+        var aktweather = jo.getJSONArray("weather").getJSONObject(0);
+
+        long sunset = jo.getJSONObject("sys").getLong("sunset");
+        var sunsetTime = Instant.ofEpochSecond(sunset).atZone(ZoneId.systemDefault()).toLocalTime();
+
+        switch (aktweather.getString("main")) {
+            case "Rain"   -> wetterIcon.setImage(new Image("/res/regen.png"));
+            case "Clouds" -> wetterIcon.setImage(new Image("/res/wolken.png"));
+            case "Clear"  -> {
+                var icon = LocalTime.now().isAfter(sunsetTime) ? "/res/mond.png" : "/res/sonne.png";
+                wetterIcon.setImage(new Image(icon));
+            }
+            default -> System.out.println("Unknown weather condition: " + aktweather.getString("main"));
+        }
+
+        double temp = ((int) ((jo.getJSONObject("main").getInt("temp") - 273.15) * 10)) / 10.0;
+        temperatur.setText(temp + "°C");
         temperatur.setFont(new Font("Arial", 90));
-
-
     }
 
-    public static void setNews(VBox newsBox) throws Exception{
-        //HeadLine News
+    public static void setNews(VBox newsBox) throws Exception {
+        var headlines = new URL("https://newsapi.org/v2/top-headlines?country=de&apiKey=e6f838bd92694c3cbe8aa71e6cb4e6a9");
+        var yc = headlines.openConnection();
         String inputLine;
-        URL headlines = new URL("https://newsapi.org/v2/top-headlines?country=de&apiKey=e6f838bd92694c3cbe8aa71e6cb4e6a9");
-        URLConnection yc = headlines.openConnection();
-        BufferedReader in = new BufferedReader(new InputStreamReader(yc.getInputStream()));
-        inputLine = in.readLine();
-        in.close();
-
-        JSONObject alleArtikel = new JSONObject(inputLine);
-        int totalResults = alleArtikel.getInt("totalResults");
-        if(totalResults > 6){
-            totalResults = 6;
+        try (var in = new BufferedReader(new InputStreamReader(yc.getInputStream()))) {
+            inputLine = in.readLine();
         }
-        Label tmpLabel;
-        for(int i = 0; i<totalResults; i++){
-            JSONObject aktuellerArtikel = alleArtikel.getJSONArray("articles").getJSONObject(i);
-            tmpLabel = new Label(aktuellerArtikel.getString("title")+"  -  "+aktuellerArtikel.getJSONObject("source").getString("name"));
-            newsBox.getChildren().add(tmpLabel);
+
+        var alleArtikel = new JSONObject(inputLine);
+        int totalResults = Math.min(alleArtikel.getInt("totalResults"), 6);
+        for (int i = 0; i < totalResults; i++) {
+            var artikel = alleArtikel.getJSONArray("articles").getJSONObject(i);
+            var label = new Label(artikel.getString("title") + "  -  " + artikel.getJSONObject("source").getString("name"));
+            newsBox.getChildren().add(label);
         }
     }
-
-
-    public static void getTime(){
-        Thread t = new Thread(new Uhr());
-        t.start();
-        //System.out.println(LocalTime.now().getHour()+":"+LocalTime.now().getMinute());
-    }
-
-
 
 
     /** Application name. */
@@ -148,14 +118,13 @@ public class GUI extends Application{
     private static FileDataStoreFactory DATA_STORE_FACTORY;
 
     /** Global instance of the JSON factory. */
-    private static final JsonFactory JSON_FACTORY =
-            JacksonFactory.getDefaultInstance();
+    private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 
     /** Global instance of the HTTP transport. */
     private static HttpTransport HTTP_TRANSPORT;
 
-    /** Global instance of the scopes required by this quickstart.
-     *
+    /**
+     * Global instance of the scopes required by this quickstart.
      * If modifying these scopes, delete your previously saved credentials
      * at ~/.credentials/calendar-java-quickstart
      */
@@ -178,19 +147,16 @@ public class GUI extends Application{
      * @throws IOException
      */
     public static Credential authorize() throws IOException {
-        // Load client secrets.
         InputStream in = new FileInputStream("client_secret.json");
-        GoogleClientSecrets clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
+        var clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
 
-        // Build flow and trigger user authorization request.
-        GoogleAuthorizationCodeFlow flow = new GoogleAuthorizationCodeFlow.Builder(
-                        HTTP_TRANSPORT, JSON_FACTORY, clientSecrets, SCOPES)
-                        .setDataStoreFactory(DATA_STORE_FACTORY)
-                        .setAccessType("offline")
-                        .build();
+        var flow = new GoogleAuthorizationCodeFlow.Builder(
+                HTTP_TRANSPORT, JSON_FACTORY, clientSecrets, SCOPES)
+                .setDataStoreFactory(DATA_STORE_FACTORY)
+                .setAccessType("offline")
+                .build();
         Credential credential = new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize("user");
-        System.out.println(
-                "Credentials saved to " + DATA_STORE_DIR.getAbsolutePath());
+        System.out.println("Credentials saved to " + DATA_STORE_DIR.getAbsolutePath());
         return credential;
     }
 
@@ -200,7 +166,7 @@ public class GUI extends Application{
      * @throws IOException
      */
     public static com.google.api.services.calendar.Calendar getCalendarService() throws IOException {
-        Credential credential = authorize();
+        var credential = authorize();
         return new com.google.api.services.calendar.Calendar.Builder(
                 HTTP_TRANSPORT, JSON_FACTORY, credential)
                 .setApplicationName(APPLICATION_NAME)
@@ -208,13 +174,9 @@ public class GUI extends Application{
     }
 
     public static void getCalendar() throws IOException {
-        // Build a new authorized API client service.
-        // Note: Do not confuse this class with the
-        //   com.google.api.services.calendar.model.Calendar class.
-        com.google.api.services.calendar.Calendar service = getCalendarService();
+        var service = getCalendarService();
 
-        // List the next 10 events from the primary calendar.
-        DateTime now = new DateTime(System.currentTimeMillis());
+        var now = new DateTime(System.currentTimeMillis());
         Events events = service.events().list("primary")
                 .setMaxResults(10)
                 .setTimeMin(now)
@@ -222,16 +184,16 @@ public class GUI extends Application{
                 .setSingleEvents(true)
                 .execute();
         List<Event> items = events.getItems();
-        if (items.size() == 0) {
+        if (items.isEmpty()) {
             System.out.println("No upcoming events found.");
         } else {
             System.out.println("Upcoming events");
-            for (Event event : items) {
+            for (var event : items) {
                 DateTime start = event.getStart().getDateTime();
                 if (start == null) {
                     start = event.getStart().getDate();
                 }
-                System.out.printf("%s (%s)\n", event.getSummary(), start);
+                System.out.printf("%s (%s)%n", event.getSummary(), start);
             }
         }
     }

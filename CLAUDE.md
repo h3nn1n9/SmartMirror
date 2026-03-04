@@ -13,11 +13,11 @@ This file provides context for AI assistants working in this repository.
 - Top news headlines (NewsAPI)
 - Upcoming Google Calendar events (OAuth2)
 
-**Language**: Java 8
-**UI Framework**: JavaFX (bundled with JDK 8)
+**Language**: Java 21
+**UI Framework**: OpenJFX 21 (declared as Maven dependency — no longer bundled with the JDK)
 **Build System**: Maven (`pom.xml`)
 **IDE**: IntelliJ IDEA (project files present)
-**Status**: Early-stage / prototype (3 commits, no tests)
+**Status**: Early-stage / prototype (no tests)
 
 ---
 
@@ -29,7 +29,6 @@ SmartMirror/
 │   ├── main/
 │   │   ├── GUI.java              # Application entry point & API integration
 │   │   ├── FensterController.java# FXML controller, manages UI components
-│   │   ├── Uhr.java              # Legacy clock thread (superseded, dead code)
 │   │   └── gui.fxml              # JavaFX layout (AnchorPane, 600×400)
 │   └── res/                      # Weather icon assets (PNG)
 │       ├── sonne.png             # Clear sky
@@ -38,11 +37,8 @@ SmartMirror/
 │       ├── sonne_wolken.png      # Partly cloudy (default)
 │       ├── mond.png              # Night clear
 │       └── wolken_nacht.png      # Night cloudy
-├── google-api-services-calendar-v3-rev287-java-1.23.0/  # Google Calendar library
-├── jackson-all-1.9.0.jar         # JSON library (legacy Jackson)
-├── java-json.jar                 # org.json library
 ├── client_secret.json            # Google OAuth2 credentials (DO NOT COMMIT)
-└── SmartMirror.iml               # IntelliJ module definition
+└── SmartMirror.iml               # IntelliJ module definition (legacy)
 ```
 
 ---
@@ -51,22 +47,17 @@ SmartMirror/
 
 ### `GUI.java` — Main Application
 - Extends `javafx.application.Application`
-- `start()`: Loads `gui.fxml`, sets fullscreen, wires the controller, then calls `setWetterData()`, `setNews()`, `getCalendar()`
-- `setWetterData()`: HTTP GET to OpenWeatherMap → parses JSON → sets weather icon and temperature on `FensterController`
+- `start()`: Loads `gui.fxml`, sets fullscreen, wires the controller, then calls `setWetterData()`, `setNews()`
+- `setWetterData()`: HTTP GET to OpenWeatherMap → parses JSON → sets weather icon and temperature; uses `Instant`/`ZoneId` for sunset calculation; switch expression for weather conditions
 - `setNews()`: HTTP GET to NewsAPI → parses JSON → creates `Label` nodes and injects into `NewsBox` VBox
 - `getCalendar()` / `authorize()` / `getCalendarService()`: Google Calendar OAuth2 flow and event listing
 - **API keys are hardcoded in this file** — see Security section below
 
 ### `FensterController.java` — FXML Controller
 - Annotated with `@FXML` for all UI bindings
-- `initializefenster()`: Starts a JavaFX `Timeline` that fires every second to call `setTime()`
+- `initializefenster()`: Starts a JavaFX `Timeline` that fires every second to update the clock
 - Exposes getters (`getNewsBox()`, `getWetterIcon()`, `getTemperatur()`) used by `GUI.java`
 - UI components: `zeit` (time Label), `NewsBox` (VBox), `wetter` (ImageView), `temperatur` (Label)
-
-### `Uhr.java` — Legacy Clock (Dead Code)
-- Implements `Runnable`, runs an infinite loop updating time every second
-- Superseded by the `Timeline` in `FensterController`; not currently instantiated
-- Can be removed without impact
 
 ### `gui.fxml` — Layout
 - Root: `AnchorPane` 600×400 px, black background
@@ -79,11 +70,12 @@ SmartMirror/
 
 | Component | Technology | Version |
 |---|---|---|
-| Language | Java | 8 (JDK 1.8) |
-| UI | JavaFX | 8 (bundled with JDK) |
-| JSON | org.json + Jackson | java-json.jar / 1.9.0 |
-| Google Calendar | Google API Client | v3, rev287 |
-| Google Auth | Google OAuth2 | 1.23.0 |
+| Language | Java | 21 |
+| UI | OpenJFX | 21.0.2 |
+| JSON | org.json | 20231013 |
+| Google Calendar | Google API Client | v3, rev20220715 |
+| Google Auth | Google OAuth2 Client | 1.34.1 |
+| Google HTTP | google-http-client-jackson2 | 1.43.3 |
 | Weather | OpenWeatherMap REST | v2.5 |
 | News | NewsAPI REST | v2 |
 
@@ -94,7 +86,7 @@ SmartMirror/
 The project uses **Maven** as its build system (`pom.xml` in the project root).
 
 ### Prerequisites
-- JDK 8 (JavaFX is bundled — no separate install needed)
+- JDK 21
 - Maven 3.x (`mvn --version` to verify)
 - `client_secret.json` in the project root (Google OAuth2)
 
@@ -104,13 +96,20 @@ The project uses **Maven** as its build system (`pom.xml` in the project root).
 |---|---|
 | `mvn compile` | Compile all sources |
 | `mvn package` | Compile + create fat JAR in `target/` |
-| `mvn exec:java` | Run the app directly (requires a display) |
+| `mvn javafx:run` | Run the app directly (requires a display) |
 | `mvn clean` | Delete the `target/` directory |
 | `mvn clean package` | Full rebuild |
 
+> **Note**: Use `mvn javafx:run` instead of `mvn exec:java`. The `javafx-maven-plugin`
+> correctly sets up the OpenJFX module path, which is required since JavaFX 11.
+
 ### Run the packaged JAR
+JavaFX native libs are platform-specific and cannot be bundled portably into the fat JAR.
+Run it by pointing at a local JavaFX SDK:
 ```bash
-java -jar target/smartmirror-1.0-SNAPSHOT.jar
+java --module-path /path/to/javafx-sdk/lib \
+     --add-modules javafx.controls,javafx.fxml \
+     -jar target/smartmirror-1.0-SNAPSHOT.jar
 ```
 
 ### Source / resource layout (non-standard)
@@ -122,8 +121,8 @@ Maven is configured to match the existing directory layout:
 | `src/main/gui.fxml` | `main/gui.fxml` | matches `getClass().getResource("gui.fxml")` |
 | `src/res/*.png` | `res/*.png` | matches `new Image("/res/<name>.png")` |
 
-### IntelliJ IDEA (legacy)
-The `SmartMirror.iml` file is still present. IntelliJ can import the project via **File → Open** (select `pom.xml`) to use the Maven configuration instead.
+### IntelliJ IDEA
+Import via **File → Open** (select `pom.xml`). IntelliJ will use the Maven configuration automatically.
 
 On first run, a browser window opens for Google OAuth2 consent. Credentials are cached in `~/.credentials/calendar-java-quickstart`.
 
@@ -185,10 +184,8 @@ StoredCredential
 
 ## Known Technical Debt
 
-- `Uhr.java` is dead code — can be safely deleted
 - `gui.fxml` uses hardcoded pixel positions — layout breaks at non-standard resolutions
 - No error handling around any HTTP or JSON parsing calls — any API failure crashes the app silently
-- `jackson-all-1.9.0.jar` is a very old Jackson version (2012); consider upgrading or switching to `org.json` exclusively
 - No null checks on API responses
 
 ---
@@ -199,7 +196,7 @@ There are **no tests** in this project. No test framework (JUnit, etc.) is confi
 
 If adding tests:
 - Create a `src/test/` directory
-- Add JUnit 4 or 5 to the classpath
+- Add JUnit 5 to `pom.xml`
 - Mock HTTP calls to external APIs (e.g., using WireMock or Mockito)
 - Test JSON parsing logic independently from network calls
 
@@ -216,9 +213,10 @@ If adding tests:
 ## What AI Assistants Should Know
 
 1. **Maven is the build system** — use `pom.xml`; do not add Gradle or Ant
-2. **Do not rename German identifiers** that appear in `gui.fxml` — they are tightly coupled to `@FXML` annotations
-3. **Do not commit** `client_secret.json` or any file containing API keys
-4. **The app requires a display** (JavaFX needs a graphics context) — it cannot run headlessly without additional configuration
-5. **`Uhr.java`** can be ignored or deleted; it has no active callers
-6. **Java 8 features only** — no modules (JPMS), no records, no sealed classes
-7. When modifying `gui.fxml`, verify `@FXML` field names in `FensterController.java` still match
+2. **Use `mvn javafx:run`** to run, not `mvn exec:java` — OpenJFX requires the module path
+3. **Do not rename German identifiers** that appear in `gui.fxml` — they are tightly coupled to `@FXML` annotations
+4. **Do not commit** `client_secret.json` or any file containing API keys
+5. **The app requires a display** (JavaFX needs a graphics context) — it cannot run headlessly without additional configuration
+6. **Java 21 features are available** — switch expressions, `var`, records, sealed classes, text blocks, pattern matching
+7. **JPMS is not used** — no `module-info.java`; JavaFX is on the module path via the `javafx-maven-plugin`
+8. When modifying `gui.fxml`, verify `@FXML` field names in `FensterController.java` still match
