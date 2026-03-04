@@ -26,8 +26,9 @@ import javafx.stage.Stage;
 import org.json.JSONObject;
 
 import java.io.*;
+import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -60,15 +61,21 @@ public class GUI extends Application {
         launch();
     }
 
-    public static void setWetterData(ImageView wetterIcon, Label temperatur) throws Exception {
-        var openweather = new URL("http://api.openweathermap.org/data/2.5/weather?id=2820621&APPID=72e171e11967724100a2bc62b8156741");
-        var yc = openweather.openConnection();
-        String inputLine;
-        try (var in = new BufferedReader(new InputStreamReader(yc.getInputStream()))) {
-            inputLine = in.readLine();
+    // Shared HTTP fetch: opens connection, reads one line, disconnects.
+    private static String fetchJson(String urlString) throws Exception {
+        var connection = new URL(urlString).openConnection();
+        try (var in = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+            return in.readLine();
+        } finally {
+            if (connection instanceof HttpURLConnection http) {
+                http.disconnect();
+            }
         }
+    }
 
-        var jo = new JSONObject(inputLine);
+    public static void setWetterData(ImageView wetterIcon, Label temperatur) throws Exception {
+        var jo = new JSONObject(fetchJson(
+                "https://api.openweathermap.org/data/2.5/weather?id=2820621&APPID=72e171e11967724100a2bc62b8156741"));
         var aktweather = jo.getJSONArray("weather").getJSONObject(0);
 
         long sunset = jo.getJSONObject("sys").getLong("sunset");
@@ -90,14 +97,8 @@ public class GUI extends Application {
     }
 
     public static void setNews(VBox newsBox) throws Exception {
-        var headlines = new URL("https://newsapi.org/v2/top-headlines?country=de&apiKey=e6f838bd92694c3cbe8aa71e6cb4e6a9");
-        var yc = headlines.openConnection();
-        String inputLine;
-        try (var in = new BufferedReader(new InputStreamReader(yc.getInputStream()))) {
-            inputLine = in.readLine();
-        }
-
-        var alleArtikel = new JSONObject(inputLine);
+        var alleArtikel = new JSONObject(fetchJson(
+                "https://newsapi.org/v2/top-headlines?country=de&apiKey=e6f838bd92694c3cbe8aa71e6cb4e6a9"));
         int totalResults = Math.min(alleArtikel.getInt("totalResults"), 6);
         for (int i = 0; i < totalResults; i++) {
             var artikel = alleArtikel.getJSONArray("articles").getJSONObject(i);
@@ -115,13 +116,13 @@ public class GUI extends Application {
             System.getProperty("user.home"), ".credentials/calendar-java-quickstart");
 
     /** Global instance of the {@link FileDataStoreFactory}. */
-    private static FileDataStoreFactory DATA_STORE_FACTORY;
+    private static final FileDataStoreFactory DATA_STORE_FACTORY;
 
     /** Global instance of the JSON factory. */
     private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 
     /** Global instance of the HTTP transport. */
-    private static HttpTransport HTTP_TRANSPORT;
+    private static final HttpTransport HTTP_TRANSPORT;
 
     /**
      * Global instance of the scopes required by this quickstart.
@@ -136,8 +137,7 @@ public class GUI extends Application {
             HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
             DATA_STORE_FACTORY = new FileDataStoreFactory(DATA_STORE_DIR);
         } catch (Throwable t) {
-            t.printStackTrace();
-            System.exit(1);
+            throw new RuntimeException("Failed to initialize Google API transport", t);
         }
     }
 
@@ -147,17 +147,19 @@ public class GUI extends Application {
      * @throws IOException
      */
     public static Credential authorize() throws IOException {
-        InputStream in = new FileInputStream("client_secret.json");
-        var clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, new InputStreamReader(in));
+        try (var fileIn = new FileInputStream("client_secret.json");
+             var reader = new InputStreamReader(fileIn, StandardCharsets.UTF_8)) {
+            var clientSecrets = GoogleClientSecrets.load(JSON_FACTORY, reader);
 
-        var flow = new GoogleAuthorizationCodeFlow.Builder(
-                HTTP_TRANSPORT, JSON_FACTORY, clientSecrets, SCOPES)
-                .setDataStoreFactory(DATA_STORE_FACTORY)
-                .setAccessType("offline")
-                .build();
-        Credential credential = new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize("user");
-        System.out.println("Credentials saved to " + DATA_STORE_DIR.getAbsolutePath());
-        return credential;
+            var flow = new GoogleAuthorizationCodeFlow.Builder(
+                    HTTP_TRANSPORT, JSON_FACTORY, clientSecrets, SCOPES)
+                    .setDataStoreFactory(DATA_STORE_FACTORY)
+                    .setAccessType("offline")
+                    .build();
+            Credential credential = new AuthorizationCodeInstalledApp(flow, new LocalServerReceiver()).authorize("user");
+            System.out.println("Credentials saved to " + DATA_STORE_DIR.getAbsolutePath());
+            return credential;
+        }
     }
 
     /**
