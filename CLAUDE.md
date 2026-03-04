@@ -15,8 +15,9 @@ This file provides context for AI assistants working in this repository.
 
 **Language**: Java 8
 **UI Framework**: JavaFX (bundled with JDK 8)
+**Build System**: Maven (`pom.xml`)
 **IDE**: IntelliJ IDEA (project files present)
-**Status**: Early-stage / prototype (3 commits, no tests, no build system)
+**Status**: Early-stage / prototype (3 commits, no tests)
 
 ---
 
@@ -90,19 +91,41 @@ SmartMirror/
 
 ## Build & Run
 
-There is **no automated build system** (no Maven, Gradle, or Ant). The project is built and run entirely from IntelliJ IDEA.
+The project uses **Maven** as its build system (`pom.xml` in the project root).
 
-### Steps to run
-1. Open the project in IntelliJ IDEA
-2. Ensure JDK 8 is configured (Project Structure → SDK)
-3. Add all JARs to the module classpath:
-   - `jackson-all-1.9.0.jar`
-   - `java-json.jar`
-   - All JARs inside `google-api-services-calendar-v3-rev287-java-1.23.0/`
-4. Run `GUI.java` as the main class
-5. On first run, a browser window will open for Google OAuth2 consent
+### Prerequisites
+- JDK 8 (JavaFX is bundled — no separate install needed)
+- Maven 3.x (`mvn --version` to verify)
+- `client_secret.json` in the project root (Google OAuth2)
 
-**Compiled output** goes to `out/` (configured in `SmartMirror.iml`).
+### Common Maven commands
+
+| Command | Effect |
+|---|---|
+| `mvn compile` | Compile all sources |
+| `mvn package` | Compile + create fat JAR in `target/` |
+| `mvn exec:java` | Run the app directly (requires a display) |
+| `mvn clean` | Delete the `target/` directory |
+| `mvn clean package` | Full rebuild |
+
+### Run the packaged JAR
+```bash
+java -jar target/smartmirror-1.0-SNAPSHOT.jar
+```
+
+### Source / resource layout (non-standard)
+Maven is configured to match the existing directory layout:
+
+| Path on disk | Lands on classpath as | Reason |
+|---|---|---|
+| `src/main/GUI.java` | `main/GUI.class` | `<sourceDirectory>src</sourceDirectory>` |
+| `src/main/gui.fxml` | `main/gui.fxml` | matches `getClass().getResource("gui.fxml")` |
+| `src/res/*.png` | `res/*.png` | matches `new Image("/res/<name>.png")` |
+
+### IntelliJ IDEA (legacy)
+The `SmartMirror.iml` file is still present. IntelliJ can import the project via **File → Open** (select `pom.xml`) to use the Maven configuration instead.
+
+On first run, a browser window opens for Google OAuth2 consent. Credentials are cached in `~/.credentials/calendar-java-quickstart`.
 
 ---
 
@@ -192,7 +215,7 @@ If adding tests:
 
 ## What AI Assistants Should Know
 
-1. **Do not add a build system** unless explicitly asked — this is an IDE-based project
+1. **Maven is the build system** — use `pom.xml`; do not add Gradle or Ant
 2. **Do not rename German identifiers** that appear in `gui.fxml` — they are tightly coupled to `@FXML` annotations
 3. **Do not commit** `client_secret.json` or any file containing API keys
 4. **The app requires a display** (JavaFX needs a graphics context) — it cannot run headlessly without additional configuration
