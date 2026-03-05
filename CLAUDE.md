@@ -14,9 +14,9 @@ This file provides context for AI assistants working in this repository.
 - Upcoming Google Calendar events (OAuth2)
 
 **Language**: Java 21
-**UI Framework**: OpenJFX 21 (declared as Maven dependency — no longer bundled with the JDK)
+**UI Framework**: OpenJFX 21
+**Application Framework**: Quarkus 3.8.4 (CDI, config, REST client)
 **Build System**: Maven (`pom.xml`)
-**IDE**: IntelliJ IDEA (project files present)
 **Status**: Early-stage / prototype (no tests)
 
 ---
@@ -27,42 +27,90 @@ This file provides context for AI assistants working in this repository.
 SmartMirror/
 ├── src/
 │   ├── main/
-│   │   ├── GUI.java              # Application entry point & API integration
-│   │   ├── FensterController.java# FXML controller, manages UI components
-│   │   └── gui.fxml              # JavaFX layout (AnchorPane, 600×400)
-│   └── res/                      # Weather icon assets (PNG)
-│       ├── sonne.png             # Clear sky
-│       ├── regen.png             # Rain
-│       ├── wolken.png            # Cloudy
-│       ├── sonne_wolken.png      # Partly cloudy (default)
-│       ├── mond.png              # Night clear
-│       └── wolken_nacht.png      # Night cloudy
-├── client_secret.json            # Google OAuth2 credentials (DO NOT COMMIT)
-└── SmartMirror.iml               # IntelliJ module definition (legacy)
+│   │   ├── java/main/
+│   │   │   ├── GUI.java              # @QuarkusMain entry point + JavaFX Application
+│   │   │   ├── FensterController.java# @Dependent FXML controller, wires services via @Inject
+│   │   │   ├── WeatherService.java   # @ApplicationScoped, calls OpenWeatherMap
+│   │   │   ├── NewsService.java      # @ApplicationScoped, calls NewsAPI
+│   │   │   ├── CalendarService.java  # @ApplicationScoped, Google Calendar OAuth2
+│   │   │   ├── WeatherClient.java    # @RegisterRestClient interface + response records
+│   │   │   └── NewsClient.java       # @RegisterRestClient interface + response records
+│   │   └── resources/
+│   │       ├── main/
+│   │       │   └── gui.fxml          # JavaFX layout (AnchorPane 600×400)
+│   │       ├── res/                  # Weather icon assets (PNG)
+│   │       │   ├── sonne.png         # Clear sky / day
+│   │       │   ├── mond.png          # Clear sky / night
+│   │       │   ├── regen.png         # Rain
+│   │       │   ├── wolken.png        # Cloudy
+│   │       │   ├── sonne_wolken.png  # Partly cloudy (default)
+│   │       │   └── wolken_nacht.png  # Night cloudy
+│   │       └── application.properties# All runtime config (API keys, URLs, Quarkus)
+└── client_secret.json                # Google OAuth2 credentials (DO NOT COMMIT)
 ```
+
+---
+
+## Architecture
+
+Quarkus acts as the IoC container and bootstrap framework. JavaFX provides the UI.
+
+```
+Quarkus (CDI container)
+  └── @ApplicationScoped WeatherService  ──► WeatherClient (@RestClient)
+  └── @ApplicationScoped NewsService     ──► NewsClient    (@RestClient)
+  └── @ApplicationScoped CalendarService ──► Google Calendar SDK
+  └── @Dependent FensterController       ──► @Inject WeatherService, NewsService
+                                             @FXML Label, VBox, ImageView …
+                                             initialize() → startClock() + loadWeather() + loadNews()
+
+JavaFX (Application thread)
+  └── GUI (extends Application)
+        └── FXMLLoader  ──controllerFactory──► CDI.current().select(FensterController)
+        └── Stage / Scene
+```
+
+### Controller lifecycle
+1. `GUI.run()` calls `Application.launch()` — Quarkus CDI is already running.
+2. `FXMLLoader` calls `controllerFactory` for `FensterController`.
+3. CDI creates the `@Dependent` bean and resolves all `@Inject` fields.
+4. `FXMLLoader` injects `@FXML` fields via reflection into the real instance (no proxy).
+5. `FXMLLoader` calls `initialize()` — all fields are populated.
 
 ---
 
 ## Key Source Files
 
-### `GUI.java` — Main Application
-- Extends `javafx.application.Application`
-- `start()`: Loads `gui.fxml`, sets fullscreen, wires the controller, then calls `setWetterData()`, `setNews()`
-- `setWetterData()`: HTTP GET to OpenWeatherMap → parses JSON → sets weather icon and temperature; uses `Instant`/`ZoneId` for sunset calculation; switch expression for weather conditions
-- `setNews()`: HTTP GET to NewsAPI → parses JSON → creates `Label` nodes and injects into `NewsBox` VBox
-- `getCalendar()` / `authorize()` / `getCalendarService()`: Google Calendar OAuth2 flow and event listing
-- **API keys are hardcoded in this file** — see Security section below
+### `GUI.java` — Entry Point
+- Implements `QuarkusApplication` and contains inner `SmartMirrorApp extends Application`
+- `main()` → `Quarkus.run(GUI.class)` starts CDI, then calls `run()`
+- `run()` → `Application.launch(SmartMirrorApp.class)` blocks until JavaFX exits
+- `SmartMirrorApp.start()` loads `gui.fxml` with a CDI-aware controller factory
 
 ### `FensterController.java` — FXML Controller
-- Annotated with `@FXML` for all UI bindings
-- `initializefenster()`: Starts a JavaFX `Timeline` that fires every second to update the clock
-- Exposes getters (`getNewsBox()`, `getWetterIcon()`, `getTemperatur()`) used by `GUI.java`
-- UI components: `zeit` (time Label), `NewsBox` (VBox), `wetter` (ImageView), `temperatur` (Label)
+- `@Dependent` scope — no CDI proxy, required for `@FXML` field injection to work
+- `@Inject WeatherService` / `@Inject NewsService`
+- `@FXML void initialize()` — called automatically by `FXMLLoader` after all fields are set
+- Self-contained: `initialize()` drives all setup; no public API needed
+
+### `WeatherClient.java` / `NewsClient.java` — REST Clients
+- MicroProfile `@RegisterRestClient` interfaces
+- API responses modelled as nested Java records (Jackson deserialises automatically)
+- Base URLs configured in `application.properties`
+
+### `WeatherService.java` / `NewsService.java` — Services
+- `@ApplicationScoped` — one instance for the app lifetime
+- API key and country injected via `@ConfigProperty`
+- Return typed value objects (`WeatherData` record, `List<String>`)
+
+### `CalendarService.java` — Google Calendar
+- `@ApplicationScoped` bean wrapping the Google Calendar Java SDK
+- OAuth2 flow unchanged — reads `client_secret.json` from the working directory
 
 ### `gui.fxml` — Layout
-- Root: `AnchorPane` 600×400 px, black background
-- Components use absolute pixel positioning — not responsive
-- Controller class set to `main.FensterController`
+- Root: `AnchorPane` 600×400 px, black background, absolute pixel positioning
+- Controller set to `main.FensterController`
+- Default weather image: `@../res/sonne_wolken.png` (classpath-relative from `main/`)
 
 ---
 
@@ -72,18 +120,19 @@ SmartMirror/
 |---|---|---|
 | Language | Java | 21 |
 | UI | OpenJFX | 21.0.2 |
-| JSON | org.json | 20231013 |
-| Google Calendar | Google API Client | v3, rev20220715 |
+| App framework | Quarkus | 3.8.4 |
+| CDI | Quarkus Arc | (bundled) |
+| REST client | quarkus-rest-client-reactive-jackson | (bundled) |
+| Config | MicroProfile Config | (bundled) |
+| JSON | Jackson (via Quarkus) | (bundled) |
+| Google Calendar | Google API Client | v3, rev20220715-1.32.1 |
 | Google Auth | Google OAuth2 Client | 1.34.1 |
-| Google HTTP | google-http-client-jackson2 | 1.43.3 |
 | Weather | OpenWeatherMap REST | v2.5 |
 | News | NewsAPI REST | v2 |
 
 ---
 
 ## Build & Run
-
-The project uses **Maven** as its build system (`pom.xml` in the project root).
 
 ### Prerequisites
 - JDK 21
@@ -95,50 +144,44 @@ The project uses **Maven** as its build system (`pom.xml` in the project root).
 | Command | Effect |
 |---|---|
 | `mvn compile` | Compile all sources |
-| `mvn package` | Compile + create fat JAR in `target/` |
-| `mvn javafx:run` | Run the app directly (requires a display) |
-| `mvn clean` | Delete the `target/` directory |
-| `mvn clean package` | Full rebuild |
+| `mvn quarkus:dev` | Dev mode with hot reload (requires a display) |
+| `mvn package` | Build `target/quarkus-app/` |
+| `mvn javafx:run` | Run via javafx-maven-plugin |
+| `mvn clean` | Delete `target/` |
 
-> **Note**: Use `mvn javafx:run` instead of `mvn exec:java`. The `javafx-maven-plugin`
-> correctly sets up the OpenJFX module path, which is required since JavaFX 11.
+> **Note**: Use `mvn javafx:run` or `mvn quarkus:dev` — both handle the OpenJFX module
+> path automatically.
 
-### Run the packaged JAR
-JavaFX native libs are platform-specific and cannot be bundled portably into the fat JAR.
-Run it by pointing at a local JavaFX SDK:
+### Run the packaged app
+
 ```bash
 java --module-path /path/to/javafx-sdk/lib \
      --add-modules javafx.controls,javafx.fxml \
-     -jar target/smartmirror-1.0-SNAPSHOT.jar
+     -jar target/quarkus-app/quarkus-run.jar
 ```
 
-### Source / resource layout (non-standard)
-Maven is configured to match the existing directory layout:
-
-| Path on disk | Lands on classpath as | Reason |
-|---|---|---|
-| `src/main/GUI.java` | `main/GUI.class` | `<sourceDirectory>src</sourceDirectory>` |
-| `src/main/gui.fxml` | `main/gui.fxml` | matches `getClass().getResource("gui.fxml")` |
-| `src/res/*.png` | `res/*.png` | matches `new Image("/res/<name>.png")` |
-
-### IntelliJ IDEA
-Import via **File → Open** (select `pom.xml`). IntelliJ will use the Maven configuration automatically.
-
-On first run, a browser window opens for Google OAuth2 consent. Credentials are cached in `~/.credentials/calendar-java-quickstart`.
+> Quarkus produces `target/quarkus-app/quarkus-run.jar` (not a single fat JAR).
+> JavaFX native libs must be on the module path at runtime.
 
 ---
 
-## External API Configuration
+## Configuration (`application.properties`)
 
-All API credentials are currently **hardcoded in `GUI.java`**. Locate and update them there:
+All runtime configuration lives in `src/main/resources/application.properties`.
+No values are hardcoded in Java source.
 
-| API | Where to get a key |
+| Key | Purpose |
 |---|---|
-| OpenWeatherMap | https://openweathermap.org/api |
-| NewsAPI | https://newsapi.org |
-| Google Calendar | Google Cloud Console → OAuth2 credentials → download as `client_secret.json` |
+| `openweather.city.id` | OpenWeatherMap city ID |
+| `openweather.api.key` | OpenWeatherMap API key |
+| `quarkus.rest-client.openweather.url` | Base URL for `WeatherClient` |
+| `news.api.key` | NewsAPI key |
+| `news.country` | Two-letter country code for headlines |
+| `quarkus.rest-client.newsapi.url` | Base URL for `NewsClient` |
+| `quarkus.http.host-enabled` | `false` — no HTTP server for a desktop app |
 
-`client_secret.json` must be present in the project root for Google Calendar auth to work.
+Quarkus also supports environment variable overrides automatically:
+`OPENWEATHER_API_KEY=…` overrides `openweather.api.key` at runtime.
 
 ---
 
@@ -150,32 +193,28 @@ The codebase mixes **German and English** identifiers (original author is German
 |---|---|
 | `Fenster` | Window |
 | `Wetter` | Weather |
-| `Uhr` / `zeit` | Clock / time |
+| `zeit` | time |
 | `Temperatur` | Temperature |
-| `Nachrichten` / `News` | News |
+| `NewsBox` | News container |
 | `Mond` | Moon |
 | `Sonne` | Sun |
 | `Wolken` | Clouds |
 | `Regen` | Rain |
 
-When adding new code, prefer **English** to gradually align the codebase, but do not rename existing identifiers in isolation as it will break FXML bindings.
+When adding new code, prefer **English**. Do not rename existing `@FXML`-bound identifiers — `fx:id` in `gui.fxml` must match the field names exactly.
 
-**Method naming**: camelCase
-**Class naming**: PascalCase
-**FXML IDs**: camelCase (must match `@FXML` field names exactly)
+**Method naming**: camelCase · **Class naming**: PascalCase · **FXML IDs**: camelCase
 
 ---
 
 ## Security Issues (Critical)
 
-1. **Hardcoded API keys** in `GUI.java` — move to a `.env` file or `config.properties` and add to `.gitignore`
-2. **`client_secret.json`** contains OAuth2 credentials and is committed to the repo — add to `.gitignore` immediately
-3. **No HTTPS certificate validation** on API HTTP calls — add proper SSL verification for production use
+1. **API keys in `application.properties`** — move to environment variables or a secrets manager; add the file to `.gitignore` in production
+2. **`client_secret.json`** in the working directory — never commit; add to `.gitignore`
 
-When fixing, add these to `.gitignore`:
+Add to `.gitignore`:
 ```
 client_secret.json
-*.properties
 .env
 StoredCredential
 ```
@@ -184,39 +223,42 @@ StoredCredential
 
 ## Known Technical Debt
 
-- `gui.fxml` uses hardcoded pixel positions — layout breaks at non-standard resolutions
-- No error handling around any HTTP or JSON parsing calls — any API failure crashes the app silently
-- No null checks on API responses
+- `FensterController.initialize()` makes synchronous HTTP calls on the JavaFX Application Thread → UI freezes during startup. Fix: use `Task<Void>` or `CompletableFuture` to load data off-thread, then update UI with `Platform.runLater()`
+- `gui.fxml` uses absolute pixel positions — layout breaks at non-standard resolutions
+- No error handling around REST calls — any API failure crashes the app silently
+- `CalendarService` still uses the legacy Google Java SDK instead of a Quarkus REST client
 
 ---
 
 ## Testing
 
-There are **no tests** in this project. No test framework (JUnit, etc.) is configured.
+There are **no tests** in this project.
 
 If adding tests:
-- Create a `src/test/` directory
-- Add JUnit 5 to `pom.xml`
-- Mock HTTP calls to external APIs (e.g., using WireMock or Mockito)
-- Test JSON parsing logic independently from network calls
+- Add `quarkus-junit5` to `pom.xml`
+- Use `@QuarkusTest` for integration tests
+- Mock REST clients with `@InjectMock` + `@RestClient`
+- Test services independently from UI
 
 ---
 
 ## Git Conventions
 
 - **Main branch**: `master`
-- **Commit messages**: No formal convention enforced; use imperative English (e.g., "Add error handling for weather API")
-- **No pre-commit hooks** are active
+- **Commit messages**: imperative English ("Add error handling for weather API")
+- **No pre-commit hooks** active
 
 ---
 
 ## What AI Assistants Should Know
 
-1. **Maven is the build system** — use `pom.xml`; do not add Gradle or Ant
-2. **Use `mvn javafx:run`** to run, not `mvn exec:java` — OpenJFX requires the module path
-3. **Do not rename German identifiers** that appear in `gui.fxml` — they are tightly coupled to `@FXML` annotations
-4. **Do not commit** `client_secret.json` or any file containing API keys
-5. **The app requires a display** (JavaFX needs a graphics context) — it cannot run headlessly without additional configuration
-6. **Java 21 features are available** — switch expressions, `var`, records, sealed classes, text blocks, pattern matching
-7. **JPMS is not used** — no `module-info.java`; JavaFX is on the module path via the `javafx-maven-plugin`
-8. When modifying `gui.fxml`, verify `@FXML` field names in `FensterController.java` still match
+1. **Standard Maven layout** — sources in `src/main/java/`, resources in `src/main/resources/`
+2. **Quarkus is the framework** — use CDI (`@Inject`, `@ApplicationScoped`, `@Dependent`), `@ConfigProperty`, `@RegisterRestClient`
+3. **Use `mvn quarkus:dev`** for development; `mvn javafx:run` also works
+4. **`FensterController` must stay `@Dependent`** — other CDI scopes create proxies that break `@FXML` field injection
+5. **Do not rename `@FXML`-bound fields** — `fx:id` in `gui.fxml` must match exactly
+6. **Do not commit** `client_secret.json` or API keys
+7. **The app requires a display** — JavaFX cannot run headlessly without extra config
+8. **Java 21 features are available** — records, switch expressions, `var`, sealed classes
+9. **JPMS is not used** — no `module-info.java`
+10. **`application.properties` is the single config source** — inject new settings with `@ConfigProperty`
