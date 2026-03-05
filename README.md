@@ -20,6 +20,7 @@ A JavaFX desktop application that transforms a monitor — mounted behind a two-
 | JDK | 21 |
 | Maven | 3.8+ |
 | A graphical display | (JavaFX cannot run headlessly) |
+| Docker + Docker Compose | 24+ *(optional, for container-based setup)* |
 
 ---
 
@@ -112,6 +113,64 @@ java --module-path /path/to/javafx-sdk/lib \
 
 ---
 
+## Running with Docker
+
+JavaFX needs access to the host display. Before starting the container, allow local Docker clients to connect to your X server:
+
+```bash
+xhost +local:docker
+```
+
+### Using Docker Compose (recommended)
+
+Create a `.env` file next to `docker-compose.yml` with your credentials:
+
+```dotenv
+OPENWEATHER_CITY_ID=2820621
+OPENWEATHER_API_KEY=your_key
+NEWS_API_KEY=your_key
+NEWS_COUNTRY=de
+```
+
+Then build and start:
+
+```bash
+docker compose up --build
+```
+
+### Using plain Docker
+
+```bash
+docker build -t smartmirror .
+
+docker run --rm \
+  --network host \
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  -e OPENWEATHER_CITY_ID=2820621 \
+  -e OPENWEATHER_API_KEY=your_key \
+  -e NEWS_API_KEY=your_key \
+  smartmirror
+```
+
+### Google Calendar inside Docker
+
+Mount your credentials into the container:
+
+```bash
+docker run --rm \
+  ... \
+  -v ./client_secret.json:/app/client_secret.json:ro \
+  -v $HOME/.credentials:/root/.credentials \
+  smartmirror
+```
+
+On first run a browser window opens on the host for the OAuth2 consent. The token is cached in `~/.credentials/calendar-java-quickstart` and reused on subsequent starts.
+
+> **Note**: The image targets Linux/x64. For ARM (e.g. Raspberry Pi 64-bit) change `openjfx-21.0.2_linux-x64_bin-sdk.zip` to `openjfx-21.0.2_linux-aarch64_bin-sdk.zip` in the `Dockerfile`.
+
+---
+
 ## Project structure
 
 ```
@@ -130,6 +189,8 @@ SmartMirror/
 │       ├── res/                    # Weather icons (PNG)
 │       └── application.properties  # All configuration
 ├── client_secret.json              # Google OAuth2 credentials (not committed)
+├── Dockerfile                      # Multi-stage Docker build
+├── docker-compose.yml              # Docker Compose with X11 forwarding
 └── pom.xml
 ```
 
